@@ -2,6 +2,7 @@ import logging
 import json
 import requests
 import os
+import aiohttp
 
 from aiohttp import web
 from urllib.parse import urlparse
@@ -33,7 +34,8 @@ class KakaoConfig:
         self.hass = hass
         self._config = config
         self._api_key = config.get(CONF_API_KEY)
-        self._host = '{uri.netloc}'.format(uri=urlparse(config.get(CONF_REDIRECT_URI)))
+        #self._host = '{uri.netloc}'.format(uri=urlparse(config.get(CONF_REDIRECT_URI)))
+        self._host = config.get(CONF_REDIRECT_URI)
         self._send_to_friends = config.get(CONF_SEND_TO_FRIENDS)
         self._friends = []
         self._access_token = None
@@ -79,7 +81,8 @@ class KakaoConfig:
             self._refresh_token = _res["refresh_token"]
             save_refresh_token()
 
-        _url = "http://{}".format(self._host)
+        #_url = "https://{}".format(self._host)
+        _url = self._host
         _LOGGER.debug("KakaoTalkView [Host URL] {}".format(_url))
         _res = await sendText(self._access_token, message, _url)
         _LOGGER.debug("KakaoTalkView [message] Result {}".format(_res))
@@ -99,7 +102,8 @@ class KakaoConfig:
             self._refresh_token = _res["refresh_token"]
             save_refresh_token()
 
-        _url = "http://{}".format(self._host)
+        #_url = "https://{}".format(self._host)
+        _url = self._host
         _res = await sendDefaultTemplate(self._access_token, title, message, image_url, _url)
         _LOGGER.debug("KakaoTalkView [message] Result {}".format(_res))
 
@@ -132,9 +136,14 @@ class KakaoConfig:
             'Content-Type' : "application/x-www-form-urlencoded",
             'Cache-Control' : "no-cache",
         }
-        reponse = requests.request("POST",url,data=payload, headers=headers)
-        access_token = json.loads(((reponse.text).encode('utf-8')))
-        return access_token
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url,data=payload, headers=headers) as r:
+                    reponse = await r.text(encoding='utf-8')
+                    access_token = json.loads(reponse)
+                    return access_token
+            except aiohttp.ClientError:
+                pass
 
     async def getAccessRefreshToken(self, clientId, refreshToken):
         url = "https://kauth.kakao.com/oauth/token"
@@ -145,25 +154,34 @@ class KakaoConfig:
             'Content-Type' : "application/x-www-form-urlencoded",
             'Cache-Control' : "no-cache",
         }
-        reponse = requests.request("POST",url,data=payload, headers=headers)
-        access_token = json.loads(((reponse.text).encode('utf-8')))
-        return access_token
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url,data=payload, headers=headers) as r:
+                    reponse = await r.text(encoding='utf-8')
+                    access_token = json.loads(reponse)
+                    return access_token
+            except aiohttp.ClientError:
+                pass
 
     async def getFriends(self, accessToken):
         url = "https://kapi.kakao.com/v1/api/talk/friends"
         headers = {
             'Authorization' : "Bearer " + accessToken,
         }
-        reponse = requests.get(url, headers=headers)
-        _LOGGER.debug("KakaoTalkView [Friends] %s", reponse.text)
-        _ret = json.loads(((reponse.text).encode('utf-8')))
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, headers=headers) as r:
+                    reponse = await r.text(encoding='utf-8')
+                    _LOGGER.debug("KakaoTalkView [Friends] %s", reponse)
+                    _ret = json.loads(reponse)
+            except aiohttp.ClientError:
+                pass
         if 'error' in _ret:
             _LOGGER.warning("KakaoTalk [Friends] Error : %s", _ret['error'])
             return
         if 'elements' in _ret:
             for friend in _ret['elements']:
                 self._friends.append(friend['uuid'])
-
         _LOGGER.debug("KakaoTalk [Friends] %s", json.dumps(self._friends))
 
 @callback
@@ -275,7 +293,7 @@ async def sendText(accessToken, message, url) :
             'link': {
                 'web_url': url,
                 'mobile_web_url': url
-             },
+            },
             'button_title': '바로 확인'
             }
     payload = 'template_object=' + json.dumps(payloadDict)
@@ -285,25 +303,30 @@ async def sendText(accessToken, message, url) :
         'Cache-Control' : "no-cache",
         'Authorization' : "Bearer " + accessToken,
     }
-    reponse = requests.request("POST",url,data=payload, headers=headers)
-    return json.loads(((reponse.text).encode('utf-8')))
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url,data=payload, headers=headers) as r:
+                reponse = await r.text(encoding='utf-8')
+                return json.loads(reponse)
+        except aiohttp.ClientError:
+            pass
 
 async def sendDefaultTemplate(accessToken, title, message, image_url, url):
     url = 'https://kapi.kakao.com/v2/api/talk/memo/default/send'
     payloadDict = {
         "object_type":"feed",
         "content":{
-          "title":title,
-          "description":message,
-          "image_url":image_url,
-          "link":{
+            "title":title,
+            "description":message,
+            "image_url":image_url,
+            "link":{
             "mobile_web_url":url,
             "web_url":url
-          }
+            }
         },
         "social":{},
         'button_title': '바로 확인'
-      }
+    }
     payload = 'template_object=' + json.dumps(payloadDict)
 
     headers = {
@@ -311,8 +334,13 @@ async def sendDefaultTemplate(accessToken, title, message, image_url, url):
         'Cache-Control' : "no-cache",
         'Authorization' : "Bearer " + accessToken,
     }
-    reponse = requests.request("POST",url,data=payload, headers=headers)
-    return json.loads(((reponse.text).encode('utf-8')))
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url,data=payload, headers=headers) as r:
+                reponse = await r.text(encoding='utf-8')
+                return json.loads(reponse)
+        except aiohttp.ClientError:
+            pass
 
 async def sendTextToFriends(accessToken, message, url, friends) :
     url = 'https://kapi.kakao.com/v1/api/talk/friends/message/default/send'
@@ -322,7 +350,7 @@ async def sendTextToFriends(accessToken, message, url, friends) :
             'link': {
                 'web_url': url,
                 'mobile_web_url': url
-             },
+            },
             'button_title': '바로 확인'
             }
     payload = {
@@ -337,25 +365,30 @@ async def sendTextToFriends(accessToken, message, url, friends) :
         'Cache-Control' : "no-cache",
         'Authorization' : "Bearer " + accessToken,
     }
-    reponse = requests.request("POST",url,data=payload, headers=headers)
-    return json.loads(((reponse.text).encode('utf-8')))
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url,data=payload, headers=headers) as r:
+                reponse = await r.text(encoding='utf-8')
+                return json.loads(reponse)
+        except aiohttp.ClientError:
+            pass
 
 async def sendDefaultTemplateToFriends(accessToken, title, message, image_url, url, friends):
     url = 'https://kapi.kakao.com/v1/api/talk/friends/message/default/send'
     payloadDict = {
         "object_type":"feed",
         "content":{
-          "title":title,
-          "description":message,
-          "image_url":image_url,
-          "link":{
+            "title":title,
+            "description":message,
+            "image_url":image_url,
+            "link":{
             "mobile_web_url":url,
             "web_url":url
-          }
+            }
         },
         "social":{},
         'button_title': '바로 확인'
-      }
+    }
     payload = {
             'receiver_uuids': json.dumps(friends), 
             'template_object': json.dumps(payloadDict)
@@ -368,5 +401,10 @@ async def sendDefaultTemplateToFriends(accessToken, title, message, image_url, u
         'Cache-Control' : "no-cache",
         'Authorization' : "Bearer " + accessToken,
     }
-    reponse = requests.request("POST",url,data=payload, headers=headers)
-    return json.loads(((reponse.text).encode('utf-8')))
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url,data=payload, headers=headers) as r:
+                reponse = await r.text(encoding='utf-8')
+                return json.loads(reponse)
+        except aiohttp.ClientError:
+            pass
